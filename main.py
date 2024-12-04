@@ -234,8 +234,13 @@ def generar_reporte():
         df_calculos = df_calculos.merge(df_stock, left_on=["Código", "numero_bodega", "Ano"], right_on=["Código", "Bodega", "Ano"], how="left")
         
         df_calculos['Prom'] = (df_calculos['12 Meses'] / 12).astype(float).round(0)
-        df_calculos['Dur'] = (df_calculos['Stock']) / df_calculos['Prom'].replace(0, pd.NA)).round(2).fillna(0)
+        #df_calculos['Dur'] = df_calculos['Stock'] / df_calculos['Prom'].replace(0)
+        # Reemplazar valores de Prom = 0 por NaN para evitar divisiones por cero
+        #df_calculos['Dur'] = (df_calculos['Stock'] / df_calculos['Prom'].replace(0, pd.NA)).fillna(0).replace([float('inf'), -float('inf')], 0).round(2)
 
+         #df_calculos['Dur'] = df_calculos['Dur'].fillna(0).round(2)   
+        # print(df_calculos[['Stock', 'Prom']], "     ", df_calculos['Stock'] / df_calculos['Prom'])
+        # print (df_calculos['Dur'] )
         #Agrupar
         df_grouped = df_calculos.groupby(campos_agrupacion_seleccionados + ["Ano"]).agg({
             "Ene": "sum", 
@@ -253,9 +258,13 @@ def generar_reporte():
             "Total": "sum",
             "12 Meses": "sum",
             "Stock": "sum",
-            "Prom": "sum",
-            "Dur": "sum",
+            "Prom": "sum"
         }).reset_index()
+
+        #Calculo con los valores agrupados
+        df_grouped['Dur'] = (
+        df_grouped['Stock'] / df_grouped['Prom'].replace(0, pd.NA)
+        ).fillna(0).replace([float('inf'), -float('inf')], 0).round(2)
 
 
         if agregar_subtotales_var.get():
