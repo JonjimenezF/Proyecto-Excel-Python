@@ -76,13 +76,11 @@ def agregar_filtro():
     actualizar_lista_filtros()
 
 def eliminar_filtro(filtro):
-    #print(f"Filtro recibido: {filtro}")
     filtro_tuple = tuple(filtro.split('='))
     filtro_tuple = (filtro_tuple[0].strip(), filtro_tuple[1].strip())
     
     if filtro_tuple in filtros_activos:
         filtros_activos.remove(filtro_tuple)
-        #print(f"Filtro '{filtro}' eliminado.")
         
         # Actualizar la interfaz
         lista_filtros.delete(0, tk.END)  # Borra todos los elementos
@@ -140,14 +138,14 @@ def calcular_ultimos_12_meses(row, df):
 def cargar_stock_desde_excel(ruta_excel):
     """
     Carga los datos de stock desde un archivo Excel y asigna los valores de stock a las correspondientes bodegas.
-    Elimina las filas duplicadas basadas en el código de producto, manteniendo solo la información relevante.
+    Elimina las filas duplicadas basadas en el código de producto, manteniendo solo la información.
     """
     try:
         # Cargar el archivo Excel y la hoja especificada
         df_stock = pd.read_excel(ruta_excel, sheet_name="Reformateado")
 
         # Imprimir los nombres de las columnas para depurar
-        print("Nombres de columnas en el archivo:", df_stock.columns)
+        #print("Nombres de columnas en el archivo:", df_stock.columns)
 
         # Verificar que la columna 'CódigoProducto' exista y renombrar
         if "CódigoProducto" not in df_stock.columns:
@@ -167,13 +165,16 @@ def cargar_stock_desde_excel(ruta_excel):
         df_stock = df_stock.drop_duplicates(subset=["Código", "Bodega"], keep="first")
 
         # Imprimir para verificar el resultado antes de regresar el DataFrame
-        print("Datos actualizados en el DataFrame con stock sin duplicados:", df_stock)
+        #print("Datos actualizados en el DataFrame con stock sin duplicados:", df_stock)
 
         # Retorna el DataFrame procesado
         return df_stock
 
     except Exception as e:
         raise Exception(f"Error al cargar y procesar los datos de stock desde Excel: {e}")
+
+
+
     
 
 filtros_activos = []
@@ -233,7 +234,7 @@ def generar_reporte():
         df_calculos = df_calculos.merge(df_stock, left_on=["Código", "numero_bodega", "Ano"], right_on=["Código", "Bodega", "Ano"], how="left")
         
         df_calculos['Prom'] = (df_calculos['12 Meses'] / 12).astype(float).round(0)
-        df_calculos['Dur'] = (df_calculos['Stock'] / df_calculos['Prom'].replace(0, pd.NA)).round(2).fillna(0)
+        df_calculos['Dur'] = (df_calculos['Stock']) / df_calculos['Prom'].replace(0, pd.NA)).round(2).fillna(0)
 
         #Agrupar
         df_grouped = df_calculos.groupby(campos_agrupacion_seleccionados + ["Ano"]).agg({
@@ -256,13 +257,75 @@ def generar_reporte():
             "Dur": "sum",
         }).reset_index()
 
-        # Guardar el DataFrame resultante en un archivo Excel
-        ruta_excel = "reporte_calculado.xlsx"
-        df_grouped.to_excel(ruta_excel, index=False)
-        messagebox.showinfo("Éxito", f"Reporte generado correctamente: {ruta_excel}")
+
+        if agregar_subtotales_var.get():
+            df_grouped = agregar_subtotales(df_grouped, campos_agrupacion_seleccionados)
+            
+            # Guardar el DataFrame resultante en un archivo Excel con subtotales
+            ruta_excel = "reporte_calculado_con_subtotales.xlsx"
+            df_grouped.to_excel(ruta_excel, index=False)
+            messagebox.showinfo("Éxito", f"Reporte generado correctamente con subtotales: {ruta_excel}")
+        else:
+            # Si no se marca el checkbox guarda el reporte sin subtotales
+            ruta_excel = "reporte_calculado.xlsx"
+            df_grouped.to_excel(ruta_excel, index=False)
+            messagebox.showinfo("Éxito", f"Reporte generado correctamente: {ruta_excel}")
 
     except Exception as e:
         messagebox.showerror("Error", f"Hubo un problema al generar el informe: {e}")
+
+import re
+
+def agregar_subtotales(df, campos_agrupacion_seleccionados):
+    """Genera subtotales por grupo de MEDID similares (por ejemplo, CLÁSICA) y agrega subtotales por año."""
+
+    # Crear un DataFrame vacío para almacenar los resultados finales
+    df_final = pd.DataFrame()
+
+    # Agrupar por los campos de agrupación seleccionados y Año para obtener las sumas por cada combinación
+    df_grouped = df.groupby(campos_agrupacion_seleccionados + ['Ano'], as_index=False).sum(numeric_only=True)
+
+    # Función para obtener el nombre común del producto
+    def obtener_nombre_comun(producto):
+        # Aquí usamos una expresión regular para extraer solo la parte general del nombre (sin el tamaño)
+        match = re.match(r"([A-Za-zÁÉÍÓÚáéíóú0-9]+(?: [A-Za-zÁÉÍÓÚáéíóú0-9]+)*)(?=\s*\d{3}X\d{3})", producto)
+        if match:
+            return match.group(1)  # Retorna el nombre común (por ejemplo, 'CLÁSICA')
+        else:
+            return producto  # Si no hay coincidencia, devuelve el nombre completo
+
+    # Crear una nueva columna para identificar el grupo general del producto (por ejemplo, CLÁSICA, etc.)
+    df_grouped['Grupo'] = df_grouped['MEDID'].apply(obtener_nombre_comun)
+
+    # Iterar sobre los grupos generales de productos (por ejemplo, CLÁSICA, etc.)
+
+    for grupo, data_grupo in df_grouped.groupby('Grupo'):
+        # Agregar las filas originales para cada grupo
+        for _, row in data_grupo.iterrows():
+            df_final = pd.concat([df_final, row.to_frame().T], ignore_index=True)
+        
+        # Agregar subtotales por año para el grupo
+        for ano in data_grupo['Ano'].unique():
+            subtotales_ano = data_grupo[data_grupo['Ano'] == ano].sum(numeric_only=True)
+            subtotales_ano['MEDID'] = f'Subtotal'  # Agregar la etiqueta de subtotal
+            subtotales_ano['Ano'] = ano  # Mantener el año en los subtotales
+            df_final = pd.concat([df_final, subtotales_ano.to_frame().T], ignore_index=True)
+        
+        # Agregar total por grupo (por ejemplo, "Total CLÁSICA")
+        total_grupo = data_grupo.sum(numeric_only=True)
+        total_grupo['MEDID'] = f'Total'  # Agregar la etiqueta de total
+        total_grupo['Ano'] = ''  # Dejar vacío el año para los totales
+        df_final = pd.concat([df_final, total_grupo.to_frame().T], ignore_index=True)
+        
+        # Agregar una fila vacía después del total
+        fila_vacia = total_grupo.copy()
+        fila_vacia[:] = ''  # Vaciar todos los valores de la fila
+        df_final = pd.concat([df_final, fila_vacia.to_frame().T], ignore_index=True)
+
+    # Eliminar la columna 'Grupo' antes de devolver el DataFrame
+    df_final = df_final.drop(columns=['Grupo'], errors='ignore')  # Usamos 'errors=ignore' para evitar errores si no existe la columna
+
+    return df_final
 
 
 # Crear la ventana principal
@@ -325,7 +388,7 @@ for i, campo in enumerate(campos_filtrados):
     checkbutton.pack(side="top", anchor="w", padx=2, pady=2)
     campos_seleccionados[campo] = var
 
-# Frame para los filtros con un diseño limpio
+# Frame para los filtros
 frame_filtro = ttk.LabelFrame(ventana, text="Filtrar por", padding=(10, 5), style="TFrame")
 frame_filtro.grid(row=0, column=2, sticky="n", padx=10, pady=10)
 
@@ -348,6 +411,7 @@ lista_filtros.pack(pady=5)
 # Botón para borrar el filtro seleccionado
 btn_eliminar_filtro = ttk.Button(frame_filtro, text="Eliminar Filtro", command=lambda: eliminar_filtro(lista_filtros.get(tk.ACTIVE)))
 btn_eliminar_filtro.pack(pady=5)
+
 
 # Función para actualizar los valores del dropdown de valores
 def actualizar_valores_dropdown(event):
@@ -372,19 +436,21 @@ for i, campo in enumerate(campos_filtrados):
     checkbutton.pack(side="top", anchor="w", padx=2, pady=2)
     campos_agrupacion[campo] = var
 
+agregar_subtotales_var = tk.IntVar()
+
+check_subtotales = tk.Checkbutton(ventana, text="Incluir subtotales", variable=agregar_subtotales_var)
+check_subtotales.grid(row=3, column=0, padx=10, pady=10)
+
+
 ventana.grid_columnconfigure(0, weight=1)  
 ventana.grid_columnconfigure(1, weight=1)  
 ventana.grid_columnconfigure(2, weight=1)  
 
-# Colocar el botón en la columna 1 y usar sticky="ew" para que se expanda
 boton_agrupar = tk.Button(ventana, text="Generar informe", command=generar_reporte)
 boton_agrupar.grid(row=4, column=1, pady=5, sticky="ew")
 
 
-# Configuración de la distribución de columnas
-ventana.grid_columnconfigure(0, weight=1)
-ventana.grid_columnconfigure(1, weight=1)
-ventana.grid_columnconfigure(2, weight=1)
-
 # Ejecutar la aplicación
 ventana.mainloop()
+
+
