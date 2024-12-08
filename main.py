@@ -4,6 +4,7 @@ import pandas as pd
 from datetime import datetime
 import os
 import pyodbc
+import re
 
 def conectar_base_datos():
     """Establece la conexión con la base de datos Access."""
@@ -267,23 +268,33 @@ def generar_reporte():
         ).fillna(0).replace([float('inf'), -float('inf')], 0).round(2)
 
 
-        if agregar_subtotales_var.get():
+        if agregar_subtotales_var.get() and agregar_subtotales_Ext.get():
+            df_grouped = Combinar_funciones(df_grouped, campos_agrupacion_seleccionados)
+            # Guardar el DataFrame resultante en un archivo Excel
+            ruta_excel = "reporte_calculado_con_subtotales_y_extra.xlsx"
+            df_grouped.to_excel(ruta_excel, index=False)
+            messagebox.showinfo("Éxito", f"Reporte generado correctamente con subtotales y extra: {ruta_excel}")
+
+        elif agregar_subtotales_var.get():
+            # Llamar a la función para calcular solo los subtotales
             df_grouped = agregar_subtotales(df_grouped, campos_agrupacion_seleccionados)
             
-            # Guardar el DataFrame resultante en un archivo Excel con subtotales
+            # Guardar el DataFrame resultante en un archivo Excel
             ruta_excel = "reporte_calculado_con_subtotales.xlsx"
             df_grouped.to_excel(ruta_excel, index=False)
             messagebox.showinfo("Éxito", f"Reporte generado correctamente con subtotales: {ruta_excel}")
+
         else:
-            # Si no se marca el checkbox guarda el reporte sin subtotales
+            # Si no se marca el checkbox, guarda el reporte sin subtotales
             ruta_excel = "reporte_calculado.xlsx"
             df_grouped.to_excel(ruta_excel, index=False)
             messagebox.showinfo("Éxito", f"Reporte generado correctamente: {ruta_excel}")
 
     except Exception as e:
+        print("Error", f"Hubo un problema al generar el informe: {e}")
         messagebox.showerror("Error", f"Hubo un problema al generar el informe: {e}")
 
-import re
+
 
 def agregar_subtotales(df, campos_agrupacion_seleccionados):
     """Genera subtotales por grupo de MEDID similares (por ejemplo, CLÁSICA) y agrega subtotales por año."""
@@ -320,6 +331,7 @@ def agregar_subtotales(df, campos_agrupacion_seleccionados):
             subtotales_ano['Ano'] = ano  # Mantener el año en los subtotales
             df_final = pd.concat([df_final, subtotales_ano.to_frame().T], ignore_index=True)
         
+
         # Agregar total por grupo (por ejemplo, "Total CLÁSICA")
         total_grupo = data_grupo.sum(numeric_only=True)
         total_grupo['MEDID'] = f'Total'  # Agregar la etiqueta de total
@@ -337,11 +349,136 @@ def agregar_subtotales(df, campos_agrupacion_seleccionados):
     return df_final
 
 
+def Combinar_funciones(df, campos_agrupacion_seleccionados):
+    """Genera subtotales por grupo de MEDID similares (por ejemplo, CLÁSICA) y agrega subtotales por año."""
+    
+    # Crear una lista para almacenar todos los resultados
+    resultados = []
+
+    # Agrupar por los campos de agrupación seleccionados y Año para obtener las sumas por cada combinación
+    df_grouped = df.groupby(campos_agrupacion_seleccionados + ['Ano'], as_index=False).sum(numeric_only=True)
+
+    # Función para obtener el nombre común del producto
+    def obtener_nombre_comun(producto):
+        match = re.match(r"([A-Za-zÁÉÍÓÚáéíóú0-9]+(?: [A-Za-zÁÉÍÓÚáéíóú0-9]+)*)(?=\s*\d{3}X\d{3})", producto)
+        return match.group(1) if match else producto
+
+    # Crear una nueva columna para identificar el grupo general del producto (por ejemplo, CLÁSICA, etc.)
+    df_grouped['Grupo'] = df_grouped['MEDID'].apply(obtener_nombre_comun)
+
+    # Iterar sobre los grupos generales de productos
+    for grupo, data_grupo in df_grouped.groupby('Grupo'):
+        # Lista temporal para almacenar las filas del grupo actual
+        filas_grupo_temporal = []
+
+        # Añadir las filas originales para cada grupo
+        filas_grupo_temporal.extend(data_grupo.to_dict(orient='records'))
+
+        # Agregar subtotales por año para el grupo (una sola vez por año)
+        for ano in data_grupo['Ano'].unique():
+            subtotales_ano = data_grupo[data_grupo['Ano'] == ano].sum(numeric_only=True)
+            subtotales_ano['MEDID'] = f'TOTALES SUB'  # Agregar la etiqueta de subtotal con el nombre del grupo
+            subtotales_ano['Ano'] = ano  # Mantener el año en los subtotales
+            filas_grupo_temporal.append(subtotales_ano.to_dict())
+
+        # Agregar total por grupo (por ejemplo, "Total CLÁSICA")
+        total_grupo = data_grupo.sum(numeric_only=True)
+        total_grupo['MEDID'] = f'TOTAL'  # Agregar la etiqueta de total con el nombre del grupo
+        total_grupo['Ano'] = ''  # Dejar vacío el año para los totales
+        filas_grupo_temporal.append(total_grupo.to_dict())
+
+        # Función para extraer las medidas del nombre del producto
+        def extraer_medidas(nombre_producto):
+            match = re.search(r"(\d+)[Xx](\d+)", nombre_producto)
+            if match:
+                medida1 = int(match.group(1)) / 100  # Convertir a metros
+                medida2 = int(match.group(2)) / 100  # Convertir a metros
+                return medida1, medida2
+            return None, None
+
+        # Conjunto para realizar un seguimiento de las combinaciones únicas de 'MEDID' y 'Ano'
+        combinaciones_vistas = set()
+        print(data_grupo)
+
+        # Ahora agregar las filas "Extra" (agrupando por Grupo)
+        for ano in data_grupo['Ano'].unique():
+            # Inicializar los valores de los meses a 0
+            valores_totales_ano = {mes: 0 for mes in ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sept", "Oct", "Nov", "Dic","Total","12 Meses","Stock","Prom","Dur"]}
+            total_meses_ano = 0
+            meses_validos_ano = 0
+            
+            # Iterar sobre las filas para este año específico
+            for _, row in data_grupo[data_grupo['Ano'] == ano].iterrows():
+                # Extraer medidas y calcular "Extra"
+                medida1, medida2 = extraer_medidas(row['MEDID'])
+                if medida1 is not None and medida2 is not None:
+                    # Calculando los valores de los meses para agrupar
+                    for mes in valores_totales_ano:
+                        cantidad_mes = pd.to_numeric(row[mes], errors='coerce')
+                        if pd.notna(cantidad_mes) and cantidad_mes > 0:
+                            valor_mes = round(medida1 * medida2 * cantidad_mes)
+                            valores_totales_ano[mes] += valor_mes
+                            total_meses_ano += valor_mes
+                            meses_validos_ano += 1
+
+            # Corregir los cálculos
+            print(f"Calculando para el año {ano}:")
+            print(f"Total de meses del año: {total_meses_ano}")
+            print(f"Meses válidos del año: {meses_validos_ano}")
+            fila_extra = {
+                'MEDID': f"TOTALES EXTRA",  # Sin el grupo
+                'Ano': ano,
+                # 'Total': total_meses_ano,  # Total de todos los meses (ya calculado)
+                # '12 Meses': total_meses_ano if meses_validos_ano > 0 else 0,  # Si hay meses válidos, usar el total, sino 0
+                # 'Stock': round(total_meses_ano / 12) if meses_validos_ano > 0 else 0,  # Si hay meses válidos, calcular el stock
+                # 'Prom': round(total_meses_ano / meses_validos_ano, 2) if meses_validos_ano > 0 else 0,  # Promedio por mes si hay meses válidos
+                # 'Dur': round(total_meses_ano / 12, 2) if total_meses_ano > 0 else 0,  # Duración calculada si el total no es 0
+            }
+            # Agregar los valores de cada mes al diccionario de la fila
+            for mes in valores_totales_ano:
+                if valores_totales_ano[mes] == 0:
+                    fila_extra[mes] = 0 
+            fila_extra.update(valores_totales_ano)
+
+            # Solo agregar la fila si no existe
+            if (ano, grupo) not in combinaciones_vistas:
+                filas_grupo_temporal.append(fila_extra)
+                combinaciones_vistas.add((ano, grupo))
+        # Agregar una fila vacía completa después de la fila "Extra"
+        filas_grupo_temporal.append({columna: None for columna in filas_grupo_temporal[0].keys()})
+
+        # Al finalizar el procesamiento de un grupo, agregar las filas del grupo a los resultados finales
+        resultados.extend(filas_grupo_temporal)
+
+    # Devolver el DataFrame final sin la columna 'Grupo'
+    df_final = pd.DataFrame(resultados)
+    df_final = df_final.drop(columns=['Grupo'], errors='ignore') 
+
+    return df_final
+
+
+
+
 # Crear la ventana principal
 ventana = tk.Tk()
 ventana.title("Generar Reporte")
 ventana.geometry("700x600")
+# Obtener las dimensiones de la pantalla
+pantalla_ancho = ventana.winfo_screenwidth()
+pantalla_alto = ventana.winfo_screenheight()
+
+# Obtener las dimensiones de la ventana
+ventana_ancho = 700
+ventana_alto = 600
+
+# Calcular las coordenadas para centrar la ventana
+pos_x = (pantalla_ancho // 2) - (ventana_ancho // 2)
+pos_y = (pantalla_alto // 2) - (ventana_alto // 2)
+
+ventana.geometry(f"{ventana_ancho}x{ventana_alto}+{pos_x}+{pos_y}")
 ventana.configure(bg="#DFDDD9")  # Fondo de la ventana
+
+
 
 # Obteniendo los campos de la tabla de la base de datos
 campos = []
@@ -445,10 +582,17 @@ for i, campo in enumerate(campos_filtrados):
     checkbutton.pack(side="top", anchor="w", padx=2, pady=2)
     campos_agrupacion[campo] = var
 
+
+agregar_subtotales_Ext = tk.IntVar()
+
+check_subtotales_extra = tk.Checkbutton(ventana, text="Incluir subtotales extra", variable=agregar_subtotales_Ext)
+check_subtotales_extra.grid(row=3, column=0, padx=1, pady=1)
+
+
 agregar_subtotales_var = tk.IntVar()
 
 check_subtotales = tk.Checkbutton(ventana, text="Incluir subtotales", variable=agregar_subtotales_var)
-check_subtotales.grid(row=3, column=0, padx=10, pady=10)
+check_subtotales.grid(row=2, column=0, padx=10, pady=10)
 
 
 ventana.grid_columnconfigure(0, weight=1)  
