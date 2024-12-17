@@ -347,9 +347,9 @@ def generar_reporte():
         print("Error", f"Hubo un problema al generar el informe: {e}")
         messagebox.showerror("Error", f"Hubo un problema al generar el informe: {e}")
 
-def agregar_subtotales(df, campos_agrupacion_seleccionados): #fUNCION CON EL CRITERIO DE AGRUPACION
+def agregar_subtotales(df, campos_agrupacion_seleccionados):  # FUNCIÓN CON EL CRITERIO DE AGRUPACIÓN
     """Genera subtotales por grupo de MEDID similares (por ejemplo, CLÁSICA) y agrega subtotales por año."""
-    
+
     # Crear un DataFrame vacío para almacenar los resultados finales
     df_final = pd.DataFrame()
 
@@ -363,9 +363,9 @@ def agregar_subtotales(df, campos_agrupacion_seleccionados): #fUNCION CON EL CRI
         return match.group(1) if match else producto  # Retorna el nombre común o el nombre completo
 
     # Crear una nueva columna para identificar el grupo general del producto
-    campo_agrupacion = campos_agrupacion_selec.get()   # Asumiendo que el usuario seleccionó solo un campo
-    if campo_agrupacion == 'MT2':  # Ejemplo de campo seleccionado
-        df_grouped['Grupo'] = df_grouped['MT2']  # Agrupar por "subfa" o cualquier campo seleccionado por el usuario
+    campo_agrupacion = campos_agrupacion_selec.get()  # Asumiendo que el usuario seleccionó solo un campo
+    if campo_agrupacion == 'MT2':
+        df_grouped['Grupo'] = df_grouped['MT2']
     elif campo_agrupacion == "SUBFA":
         df_grouped['Grupo'] = df_grouped['SUBFA']
     elif campo_agrupacion == "LINEA":
@@ -383,40 +383,55 @@ def agregar_subtotales(df, campos_agrupacion_seleccionados): #fUNCION CON EL CRI
     elif campo_agrupacion == "LOCAL":
         df_grouped['Grupo'] = df_grouped['LOCAL']
     else:
-        df_grouped['Grupo'] = df_grouped['CRITERIO PARA AGRUPAR'].apply(obtener_nombre_comun)
-
+        if campos_agrupacion_seleccionados[0] == 'CRITERIO PARA AGRUPAR':
+            df_grouped['Grupo'] = df_grouped['CRITERIO PARA AGRUPAR'].apply(obtener_nombre_comun)
+        else:
+            df_grouped['Grupo'] = df_grouped['DESCRIPCION']
 
     # Iterar sobre los grupos generales de productos
     for grupo, data_grupo in df_grouped.groupby('Grupo'):
+        # Agregar una fila especial con el nombre del grupo
+        fila_grupo = {col: None for col in df_grouped.columns}
+        #print(df_grouped.columns)
+        if campos_agrupacion_seleccionados[0] == 'CRITERIO PARA AGRUPAR':
+            fila_grupo['CRITERIO PARA AGRUPAR'] = f"**{grupo}**" # Etiqueta de subtotal
+        else:
+            print("HOLA")
+            fila_grupo['DESCRIPCION'] = f"**{grupo}**"
+        #fila_grupo['DESCRIPCION'] = f"**{grupo}**"  # Nombre del grupo en 'DESCRIPCION'
+        df_final = pd.concat([df_final, pd.DataFrame([fila_grupo])], ignore_index=True)
+
         # Agregar las filas originales para cada grupo
         for _, row in data_grupo.iterrows():
             df_final = pd.concat([df_final, row.to_frame().T], ignore_index=True)
-        
+
         # Agregar subtotales por año para el grupo
         for ano in data_grupo['Ano'].unique():
             subtotales_ano = data_grupo[data_grupo['Ano'] == ano].sum(numeric_only=True)
-            subtotales_ano['CRITERIO PARA AGRUPAR'] = f'TOTALES SUB'  # Etiqueta de subtotal
+            if campos_agrupacion_seleccionados[0] == 'CRITERIO PARA AGRUPAR':
+                subtotales_ano['CRITERIO PARA AGRUPAR'] = f'TOTALES SUB'  # Etiqueta de subtotal
+            else:
+                subtotales_ano['DESCRIPCION'] = f'TOTALES SUB'
+
             subtotales_ano['Ano'] = ano  # Mantener el año en los subtotales
             df_final = pd.concat([df_final, subtotales_ano.to_frame().T], ignore_index=True)
-        
+
         # Agregar una fila vacía después de cada grupo (después de los subtotales)
-        fila_vacia = {columna: None for columna in df_final.columns}  # Crear una fila vacía
+        fila_vacia = {columna: None for columna in df_final.columns}
         df_final = pd.concat([df_final, pd.DataFrame([fila_vacia])], ignore_index=True)
 
     # Eliminar las columnas innecesarias antes de devolver el DataFrame
     campo_a_ignorar = campos_agrupacion_selec.get()
-    
     df_final = df_final.drop(columns=[campo_a_ignorar], errors='ignore')
-    df_final = df_final.drop(columns=['Grupo'], errors='ignore')  # Usamos 'errors=ignore' para evitar errores si no existe la columna
+    df_final = df_final.drop(columns=['Grupo'], errors='ignore')
     df_final = df_final.drop(columns=['MT2'], errors='ignore')
 
     return df_final
 
 
+
 def agregar_subtotales_Extra(df, campos_agrupacion_seleccionados): #fUNCION CON EL CRITERIO DE AGRUPACION
     """Genera subtotales por grupo de productos similares y agrega subtotales por año."""
-
-    import re
 
     # Crear una lista para almacenar todos los resultados
     resultados = []
@@ -451,7 +466,11 @@ def agregar_subtotales_Extra(df, campos_agrupacion_seleccionados): #fUNCION CON 
     elif campo_agrupacion == "LOCAL":
         df_grouped['Grupo'] = df_grouped['LOCAL']
     else:
-        df_grouped['Grupo'] = df_grouped['CRITERIO PARA AGRUPAR'].apply(obtener_nombre_comun)
+        #print(df_grouped)
+        if campos_agrupacion_seleccionados[0] == 'CRITERIO PARA AGRUPAR':
+            df_grouped['Grupo'] = df_grouped['CRITERIO PARA AGRUPAR'].apply(obtener_nombre_comun)
+        else:
+            df_grouped['Grupo'] = df_grouped['DESCRIPCION']
 
     #print(df_grouped)
     # Iterar sobre los grupos generales de productos
@@ -459,11 +478,23 @@ def agregar_subtotales_Extra(df, campos_agrupacion_seleccionados): #fUNCION CON 
         # Lista temporal para almacenar las filas del grupo actual
         filas_grupo_temporal = []
 
+         # === AGREGAR FILA DEL NOMBRE DEL GRUPO ===
+        fila_grupo = {columna: None for columna in df_grouped.columns}
+        if campos_agrupacion_seleccionados[0] == 'CRITERIO PARA AGRUPAR':
+            fila_grupo['CRITERIO PARA AGRUPAR'] = f"**{grupo}**"
+        else:
+            fila_grupo['DESCRIPCION'] = f"**{grupo}**"
+        filas_grupo_temporal.append(fila_grupo)
         # Añadir las filas originales para cada grupo
         filas_grupo_temporal.extend(data_grupo.to_dict(orient='records'))
 
         total_grupo = data_grupo.sum(numeric_only=True)
-        total_grupo['CRITERIO PARA AGRUPAR'] = f'TOTAL'
+        #total_grupo['CRITERIO PARA AGRUPAR'] = f'TOTAL'
+        if campos_agrupacion_seleccionados[0] == 'CRITERIO PARA AGRUPAR':
+                total_grupo['CRITERIO PARA AGRUPAR'] = f'TOTALES'  # Etiqueta de subtotal
+        else:
+                total_grupo['DESCRIPCION'] = f'TOTALES SUB'
+
         total_grupo['Ano'] = ''  # Dejar vacío el año para los totales
         filas_grupo_temporal.append(total_grupo.to_dict())
 
@@ -484,7 +515,7 @@ def agregar_subtotales_Extra(df, campos_agrupacion_seleccionados): #fUNCION CON 
                                 valores_totales_ano[mes] += valor_mes
 
             fila_extra = {
-                'CRITERIO PARA AGRUPAR': f"TOTALES EXTRA",
+                campos_agrupacion_seleccionados[0] : f"TOTALES EXTRA",
                 'Ano': ano,
             }
             fila_extra.update(valores_totales_ano)
@@ -508,7 +539,7 @@ def agregar_subtotales_Extra(df, campos_agrupacion_seleccionados): #fUNCION CON 
 
     return df_final
 
-def Combinar_funciones(df, campo_agrupacion_seleccionado): #fUNCION CON EL CRITERIO DE AGRUPACION
+def Combinar_funciones(df, campos_agrupacion_seleccionados): #fUNCION CON EL CRITERIO DE AGRUPACION
     """Genera subtotales por grupo de productos similares y agrega subtotales por año sin el total general, solo la fila vacía."""
     #print(df)
     
@@ -517,7 +548,7 @@ def Combinar_funciones(df, campo_agrupacion_seleccionado): #fUNCION CON EL CRITE
     resultados = []
 
     # Agrupar por los campos de agrupación seleccionados y Año para obtener las sumas por cada combinación
-    df_grouped = df.groupby(campo_agrupacion_seleccionado + ['Ano'], as_index=False).sum(numeric_only=True)
+    df_grouped = df.groupby(campos_agrupacion_seleccionados + ['Ano'], as_index=False).sum(numeric_only=True)
 
     #print(df_grouped)
     # Función para obtener el nombre común del producto
@@ -546,20 +577,37 @@ def Combinar_funciones(df, campo_agrupacion_seleccionado): #fUNCION CON EL CRITE
     elif campo_agrupacion == "LOCAL":
         df_grouped['Grupo'] = df_grouped['LOCAL']
     else:
-        df_grouped['Grupo'] = df_grouped['CRITERIO PARA AGRUPAR'].apply(obtener_nombre_comun)
+        #print(df_grouped)
+        if campos_agrupacion_seleccionados[0] == 'CRITERIO PARA AGRUPAR':
+            df_grouped['Grupo'] = df_grouped['CRITERIO PARA AGRUPAR'].apply(obtener_nombre_comun)
+        else:
+            df_grouped['Grupo'] = df_grouped['DESCRIPCION']
 
     # Iterar sobre los grupos generales de productos
     for grupo, data_grupo in df_grouped.groupby('Grupo'):
         # Lista temporal para almacenar las filas del grupo actual
         filas_grupo_temporal = []
 
+          # === AGREGAR FILA DEL NOMBRE DEL GRUPO ===
+        fila_grupo = {columna: None for columna in df_grouped.columns}
+        if campos_agrupacion_seleccionados[0] == 'CRITERIO PARA AGRUPAR':
+            fila_grupo['CRITERIO PARA AGRUPAR'] = f"**{grupo}**"
+        else:
+            fila_grupo['DESCRIPCION'] = f"**{grupo}**"
+        filas_grupo_temporal.append(fila_grupo)
         # Añadir las filas originales para cada grupo
         filas_grupo_temporal.extend(data_grupo.to_dict(orient='records'))
-
+        
         # Agregar subtotales por año para el grupo
         for ano in data_grupo['Ano'].unique():
             subtotales_ano = data_grupo[data_grupo['Ano'] == ano].sum(numeric_only=True)
-            subtotales_ano['CRITERIO PARA AGRUPAR'] = f'TOTALES SUB'
+            print(campos_agrupacion_seleccionados[0])
+            if campos_agrupacion_seleccionados[0] == 'CRITERIO PARA AGRUPAR':
+                subtotales_ano['CRITERIO PARA AGRUPAR'] = f'TOTALES SUB'  # Etiqueta de subtotal
+            else:
+                subtotales_ano['DESCRIPCION'] = f'TOTALES SUB'
+
+            #subtotales_ano['CRITERIO PARA AGRUPAR'] = f'TOTALES SUB'
             subtotales_ano['Ano'] = ano
             filas_grupo_temporal.append(subtotales_ano.to_dict())
 
@@ -580,7 +628,7 @@ def Combinar_funciones(df, campo_agrupacion_seleccionado): #fUNCION CON EL CRITE
                                 valores_totales_ano[mes] += valor_mes
 
             fila_extra = {
-                'CRITERIO PARA AGRUPAR': f"TOTALES EXTRA",
+                campos_agrupacion_seleccionados[0] : f"TOTALES EXTRA",
                 'Ano': ano,
             }
             fila_extra.update(valores_totales_ano)
@@ -765,7 +813,7 @@ combo_filtro_campo.bind("<<ComboboxSelected>>", lambda e: cargar_datos_en_memori
 frame_agrupacion = ttk.LabelFrame(ventana, text="Agrupar por", padding=(10, 5), style="TFrame")
 frame_agrupacion.grid(row=0, column=1, sticky="n", padx=10, pady=10)
 
-# Usamos una variable Tkinter para almacenar el campo seleccionado
+# Usamos una variable Tkinter para almacenar el campo seleccionado 
 campo_agrupacion_actual_seleccionado = tk.StringVar()
 
 # Crear los RadioButtons para la selección de agrupación
@@ -785,9 +833,9 @@ check_subtotales = tk.Checkbutton(ventana, text="Incluir Subtotales Agrupados", 
 check_subtotales.grid(row=1, column=0, padx=(60,10), pady=5, sticky="w")  # Alineado a la izquierda (west)
 
 # Variable para incluir total
-agregar_subtotales_individual_var = tk.IntVar()
-check_subtotales_individual = tk.Checkbutton(ventana, text="Incluir Total", variable=agregar_subtotales_individual_var)
-check_subtotales_individual.grid(row=3, column=0, padx=(60,10), pady=5, sticky="w")  # Alineado a la izquierda
+# agregar_subtotales_individual_var = tk.IntVar()
+# check_subtotales_individual = tk.Checkbutton(ventana, text="Incluir Total", variable=agregar_subtotales_individual_var)
+# check_subtotales_individual.grid(row=3, column=0, padx=(60,10), pady=5, sticky="w")  # Alineado a la izquierda
 
 # Variable para incluir subtotales extra
 agregar_subtotales_Ext = tk.IntVar()
