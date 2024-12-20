@@ -284,9 +284,10 @@ def generar_reporte():
         df_calculos['Stock'] = df_calculos.groupby(['Código', 'numero_bodega', 'Ano'])['Stock'].transform(lambda x: x.where(x.index == x.index[0], 0))
 
         # Verificar el resultado
-        #print(df_calculos.head())
+       
+
         mes_actual = datetime.now().month
-        df_calculos['Prom'] = (df_calculos['12 Meses'] / mes_actual).astype(float).round(0)
+        df_calculos['Prom'] = (df_calculos['12 Meses'] / mes_actual).round(2)
         campo_seleccionado = campos_agrupacion_selec.get()  # Obtén el campo seleccionado
         if campo_seleccionado and campo_seleccionado not in campos_agrupacion_seleccionados:
             campos_agrupacion_seleccionados.append(campo_seleccionado)  # Asegúrate de que esté incluido
@@ -312,8 +313,7 @@ def generar_reporte():
 
         #Calculo con los valores agrupados
         df_grouped['Dur'] = (
-        df_grouped['Stock'] / df_grouped['Prom'].replace(0, pd.NA)
-        ).fillna(0).replace([float('inf'), -float('inf')], 0).round(2)
+        df_grouped['Stock'] / df_grouped['Prom']).round(2)
 
         if agregar_subtotales_var.get() and agregar_subtotales_Ext.get():
             # Generar subtotales y guardar en un DataFrameW
@@ -374,7 +374,7 @@ def agregar_subtotales(df, campos_agrupacion_seleccionados):  # FUNCIÓN CON EL 
 
     # Crear una nueva columna para identificar el grupo general del producto
     campo_agrupacion = campos_agrupacion_selec.get()  # Asumiendo que el usuario seleccionó solo un campo
-    if campo_agrupacion == 'MT2':
+    if campo_agrupacion == 'MT2':  
         df_grouped['Grupo'] = df_grouped['MT2']
     elif campo_agrupacion == "SUBFA":
         df_grouped['Grupo'] = df_grouped['SUBFA']
@@ -392,6 +392,10 @@ def agregar_subtotales(df, campos_agrupacion_seleccionados):  # FUNCIÓN CON EL 
         df_grouped['Grupo'] = df_grouped['PROVEEDOR']
     elif campo_agrupacion == "LOCAL":
         df_grouped['Grupo'] = df_grouped['LOCAL']
+    elif campo_agrupacion == "MEDID":
+        df_grouped['Grupo'] = df_grouped['MEDID']
+    elif campo_agrupacion == "EMPRESA":
+        df_grouped['Grupo'] = df_grouped['EMPRESA']
     else:
         if campos_agrupacion_seleccionados[0] == 'CRITERIO PARA AGRUPAR':
             df_grouped['Grupo'] = df_grouped['CRITERIO PARA AGRUPAR'].apply(obtener_nombre_comun)
@@ -474,6 +478,10 @@ def agregar_subtotales_Extra(df, campos_agrupacion_seleccionados):
         df_grouped['Grupo'] = df_grouped['PROVEEDOR']
     elif campo_agrupacion == "LOCAL":
         df_grouped['Grupo'] = df_grouped['LOCAL']
+    elif campo_agrupacion == "MEDID":
+        df_grouped['Grupo'] = df_grouped['MEDID']
+    elif campo_agrupacion == "EMPRESA":
+        df_grouped['Grupo'] = df_grouped['EMPRESA']
     else:
         if campos_agrupacion_seleccionados[0] == 'CRITERIO PARA AGRUPAR':
             df_grouped['Grupo'] = df_grouped['CRITERIO PARA AGRUPAR'].apply(obtener_nombre_comun)
@@ -498,75 +506,84 @@ def agregar_subtotales_Extra(df, campos_agrupacion_seleccionados):
         filas_grupo_temporal.extend(data_grupo.to_dict(orient='records'))
 
         if marcar.get() == 1:
-            for _, row in data_grupo.iterrows():  # Iterar sobre todas las filas
-                # Filtrar las filas por año directamente desde la fila actual
-                ano = row['Ano']  # Obtener el año de la fila
-                valores_totales_ano = {mes: 0 for mes in ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sept", "Oct", "Nov", "Dic", "Total", "12 Meses", "Stock", "Prom", "Dur"]}
+            filas_grupo_temporal = []  # Lista para almacenar las filas procesadas
+            valores_acumulados_por_ano = {}  # Acumuladores por año y nombre común
+            nombre_comun_anterior = None
 
+            def obtener_nombre_comun(producto):
+                # Esta función obtiene el nombre en común del producto
+                match = re.match(r"([A-Za-zÁÉÍÓÚáéíóú0-9]+(?: [A-Za-zÁÉÍÓÚáéíóú0-9]+)*)(?=\s*\d{3}X\d{3})", producto)
+                return match.group(1) if match else producto
+
+            for _, row in data_grupo.iterrows():
+                producto_actual = row[campos_agrupacion_seleccionados[0]]
+                nombre_comun_actual = obtener_nombre_comun(producto_actual)
+                ano = row['Ano']  # Obtener el año actual de la fila
+
+                # Si cambia el nombre común, agregar filas de totales acumulados del anterior
+                if nombre_comun_anterior and nombre_comun_actual != nombre_comun_anterior:
+                    for ano_acumulado, valores_totales in valores_acumulados_por_ano[nombre_comun_anterior].items():
+                        fila_totales = {mes: valores_totales[mes] for mes in valores_totales}
+                        fila_totales.update({
+                            campos_agrupacion_seleccionados[0]: f"TOTALES EXTRA: {nombre_comun_anterior}",
+                            'Ano': ano_acumulado
+                        })
+                        filas_grupo_temporal.append(fila_totales)
+                    valores_acumulados_por_ano[nombre_comun_anterior] = {}  # Limpiar acumulador para el siguiente nombre común
+
+                # Inicializar acumulador por año para el nuevo grupo
+                if nombre_comun_actual not in valores_acumulados_por_ano:
+                    valores_acumulados_por_ano[nombre_comun_actual] = {}
+                if ano not in valores_acumulados_por_ano[nombre_comun_actual]:
+                    valores_acumulados_por_ano[nombre_comun_actual][ano] = {mes: 0 for mes in ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sept", "Oct", "Nov", "Dic", "Total", "12 Meses", "Stock", "Prom", "Dur"]}
+
+                # Sumar valores de la fila actual al acumulador correspondiente
+                for mes in valores_acumulados_por_ano[nombre_comun_actual][ano]:
+                    cantidad_mes = pd.to_numeric(row[mes], errors='coerce')
+                    m2 = pd.to_numeric(row['MT2'], errors='coerce')
+                    if pd.notna(cantidad_mes) and cantidad_mes > 0 and pd.notna(m2) and m2 > 0:
+                        valores_acumulados_por_ano[nombre_comun_actual][ano][mes] += round(m2 * cantidad_mes)
+
+                # Agregar la fila actual al resultado
+                filas_grupo_temporal.append(row.to_dict())
+                nombre_comun_anterior = nombre_comun_actual
+
+            # Agregar filas de totales acumulados del último grupo
+            if nombre_comun_anterior:
+                for ano_acumulado, valores_totales in valores_acumulados_por_ano[nombre_comun_anterior].items():
+                    fila_totales = {mes: valores_totales[mes] for mes in valores_totales}
+                    fila_totales.update({
+                        campos_agrupacion_seleccionados[0]: f"TOTALES EXTRA: {nombre_comun_anterior}",
+                        'Ano': ano_acumulado
+                    })
+                    filas_grupo_temporal.append(fila_totales)
+
+            # Reemplazar los datos originales con los nuevos
+            data_grupo = pd.DataFrame(filas_grupo_temporal)
+
+
+                
+#---------------
+        for ano in data_grupo['Ano'].unique():
+            valores_totales_ano = {mes: 0 for mes in ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sept", "Oct", "Nov", "Dic", "Total", "12 Meses", "Stock", "Prom", "Dur"]}
+
+            for _, row in data_grupo[data_grupo['Ano'] == ano].iterrows():
                 m2 = pd.to_numeric(row['MT2'], errors='coerce')  
                 if pd.notna(m2) and m2 > 0:
                     for mes in valores_totales_ano:
                         cantidad_mes = pd.to_numeric(row[mes], errors='coerce')
                         if pd.notna(cantidad_mes) and cantidad_mes > 0:
                             valor_mes = round(m2 * cantidad_mes)
-                            valores_totales_ano[mes] = valor_mes  # Asignar el valor calculado para cada mes individualmente
-                            #print(row[campos_agrupacion_seleccionados[0]])
-                            #print("m2: ", m2, " cantidad_mes: ", cantidad_mes, " Total: ", valor_mes)
-                            #print(valores_totales_ano)
+                            valores_totales_ano[mes] += valor_mes
 
-                # Crear una fila para los totales extra de cada producto (de forma individual)
-                fila_extra = {
-                    campos_agrupacion_seleccionados[0]: f"TOTALES EXTRA: {row[campos_agrupacion_seleccionados[0]]}",  # Producto
-                    'Ano': ano,  # Año
-                }
-
-                fila_extra.update(valores_totales_ano)
-
-                # Buscar el índice de la fila original que corresponde a esta agrupación
-                indice = None
-                for i, fila in enumerate(filas_grupo_temporal):
-                    ano_actual = datetime.now().year
-                    #print(i)
-                    #print(fila[campos_agrupacion_seleccionados[0]],"fila" ,row[campos_agrupacion_seleccionados[0]]," ", fila)
-                    if fila[campos_agrupacion_seleccionados[0]] == row[campos_agrupacion_seleccionados[0]] and fila['Ano'] == ano_actual:
-                        indice = i
-                        
-                        break
-                
-                # Si se encuentra la fila original, agregar la fila extra justo debajo
-                if indice is not None:
-                    # Insertar la fila extra justo debajo de la fila original
-                    filas_grupo_temporal.insert(indice + 1, fila_extra)
-                else:
-                    filas_grupo_temporal.sort(key=lambda x: (x[campos_agrupacion_seleccionados[0]], x['Ano']))
-                    # Si no se encuentra, agregar la fila extra como una nueva fila
-                    filas_grupo_temporal.append(fila_extra)
-                
-
-
-
-    
-        else:  # Si no se marca el check, realizar cálculos por grupo completo
-            for ano in data_grupo['Ano'].unique():
-                valores_totales_ano = {mes: 0 for mes in ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sept", "Oct", "Nov", "Dic", "Total", "12 Meses", "Stock", "Prom", "Dur"]}
-
-                for _, row in data_grupo[data_grupo['Ano'] == ano].iterrows():
-                    m2 = pd.to_numeric(row['MT2'], errors='coerce')  
-                    if pd.notna(m2) and m2 > 0:
-                        for mes in valores_totales_ano:
-                            cantidad_mes = pd.to_numeric(row[mes], errors='coerce')
-                            if pd.notna(cantidad_mes) and cantidad_mes > 0:
-                                valor_mes = round(m2 * cantidad_mes)
-                                valores_totales_ano[mes] += valor_mes
-
-                fila_extra = {
-                    campos_agrupacion_seleccionados[0]: f"TOTALES EXTRA",
-                    'Ano': ano,
-                }
-                fila_extra.update(valores_totales_ano)
+            fila_extra = {
+                campos_agrupacion_seleccionados[0]: f"TOTALES EXTRA GENERAL",
+                'Ano': ano,
+            }
+            fila_extra.update(valores_totales_ano)
 
                 # Agregar la fila de totales extra al grupo
-                filas_grupo_temporal.append(fila_extra)
+            filas_grupo_temporal.append(fila_extra)
 
         # Agregar una fila vacía completa después del grupo
         filas_grupo_temporal.append({columna: None for columna in filas_grupo_temporal[0].keys()})
@@ -603,8 +620,8 @@ def Combinar_funciones(df, campos_agrupacion_seleccionados): #fUNCION CON EL CRI
 
     # Verificar si el campo seleccionado es el adecuado para agrupar
     campo_agrupacion = campos_agrupacion_selec.get()   # Asumiendo que el usuario seleccionó solo un campo
-    if campo_agrupacion == 'MT2':  # Ejemplo de campo seleccionado
-        df_grouped['Grupo'] = df_grouped['MT2']  
+    if campo_agrupacion == 'MT2':  
+        df_grouped['Grupo'] = df_grouped['MT2']
     elif campo_agrupacion == "SUBFA":
         df_grouped['Grupo'] = df_grouped['SUBFA']
     elif campo_agrupacion == "LINEA":
@@ -621,6 +638,10 @@ def Combinar_funciones(df, campos_agrupacion_seleccionados): #fUNCION CON EL CRI
         df_grouped['Grupo'] = df_grouped['PROVEEDOR']
     elif campo_agrupacion == "LOCAL":
         df_grouped['Grupo'] = df_grouped['LOCAL']
+    elif campo_agrupacion == "MEDID":
+        df_grouped['Grupo'] = df_grouped['MEDID']
+    elif campo_agrupacion == "EMPRESA":
+        df_grouped['Grupo'] = df_grouped['EMPRESA']
     else:
         if campos_agrupacion_seleccionados[0] == 'CRITERIO PARA AGRUPAR':
             df_grouped['Grupo'] = df_grouped['CRITERIO PARA AGRUPAR'].apply(obtener_nombre_comun)
