@@ -39,7 +39,7 @@ def obtener_datos(tabla):
         df = pd.read_sql(query, conn)
         conn.close()
 
-        # Asegúrate de convertir la columna 'numero_bodega' a tipo entero
+        #convertir la columna 'numero_bodega' a tipo entero
         if 'numero_bodega' in df.columns:
             df['numero_bodega'] = df['numero_bodega'].astype('Int64')  # Usa 'Int64' para permitir valores nulos si es necesario
 
@@ -178,13 +178,11 @@ def calcular_ultimos_12_meses(row, df):
 def cargar_stock_desde_excel(ruta_excel):
     """
     Carga los datos de stock desde un archivo Excel y asigna los valores de stock a las correspondientes bodegas.
-    Elimina las filas duplicadas basadas en el código de producto, manteniendo solo la información.
+    El stock solo se coloca una vez por codigo y N° bodega.
     """
     try:
         # Cargar el archivo Excel y la hoja especificada
         df_stock = pd.read_excel(ruta_excel, sheet_name="Reformateado")
-
-        # Imprimir los nombres de las columnas para depurar
         #print("Nombres de columnas en el archivo:", df_stock.columns)
 
         # Verificar que la columna 'CódigoProducto' exista y renombrar
@@ -201,7 +199,6 @@ def cargar_stock_desde_excel(ruta_excel):
         if "Cantidad" not in df_stock.columns:
             raise Exception("El archivo Excel debe contener la columna 'Stock'.")
 
-        # Eliminar filas duplicadas por el código de producto, manteniendo la primera ocurrencia
         df_stock = df_stock.drop_duplicates(subset=["Código", "Bodega"], keep="first")
 
         # Imprimir para verificar el resultado antes de regresar el DataFrame
@@ -230,10 +227,10 @@ def generar_reporte():
 
     # Verifica si el campo seleccionado no está en los campos obligatorios
     if campo_seleccionado and campo_seleccionado not in campos_obligatorios:
-        campos_obligatorios.append(campo_seleccionado)  # Asegúrate de incluirlo
+        campos_obligatorios.append(campo_seleccionado)  # Añade el campo seleccionado
 
     # Ahora, la lista de campos obligatorios contendrá también el campo seleccionado
-    campos_obligatorios = list(set(campos_obligatorios))  # Elimina duplicados, si es necesario
+    campos_obligatorios = list(set(campos_obligatorios))  #     Elimina duplicados
 
     # Obtener los campos seleccionados desde la interfaz
     seleccionados = [campo for campo, var in campos_seleccionados.items() if var.get() == 1]
@@ -368,6 +365,9 @@ def generar_reporte():
             df_grouped = df_grouped.drop(columns=['MT2'], errors='ignore')
             df_grouped.to_excel(ruta_excel, index=False)
             messagebox.showinfo("Éxito", f"Reporte generado correctamente: {ruta_excel}")
+            # df_calculos = df_calculos.drop(columns=['MT2'], errors='ignore')
+            # df_calculos.to_excel(ruta_excel, index=False)
+            # messagebox.showinfo("Éxito", f"Reporte generado correctamente: {ruta_excel}")
 
     except Exception as e:
         print("Error", f"Hubo un problema al generar el informe: {e}")
@@ -382,6 +382,8 @@ def agregar_subtotales(df, campos_agrupacion_seleccionados):  # FUNCIÓN CON EL 
 
     # Crear un DataFrame vacío para almacenar los resultados finales
     df_final = pd.DataFrame()
+
+    anos_presentes = df['Ano'].unique()
 
     # Agrupar por los campos de agrupación seleccionados y Año para obtener las sumas por cada combinación
     df_grouped = df.groupby(campos_agrupacion_seleccionados + ['Ano'], as_index=False).sum(numeric_only=True)
@@ -402,6 +404,8 @@ def agregar_subtotales(df, campos_agrupacion_seleccionados):  # FUNCIÓN CON EL 
         df_grouped['Grupo'] = df_grouped['LINEA']
     elif campo_agrupacion == "EMPRESA":
         df_grouped['Grupo'] = df_grouped['EMPRESA']
+    elif campo_agrupacion == "COMP":
+        df_grouped['Grupo'] = df_grouped['COMP']
     elif campo_agrupacion == "numero_bodega":
         df_grouped['Grupo'] = df_grouped['numero_bodega']
     elif campo_agrupacion == "FLIA":
@@ -432,13 +436,15 @@ def agregar_subtotales(df, campos_agrupacion_seleccionados):  # FUNCIÓN CON EL 
             fila_grupo['CRITERIO PARA AGRUPAR'] = f"**{grupo}**" # Etiqueta de subtotal
         else:
             fila_grupo['DESCRIPCION'] = f"**{grupo}**"
-        #fila_grupo['DESCRIPCION'] = f"**{grupo}**"  # Nombre del grupo en 'DESCRIPCION'
+
         df_final = pd.concat([df_final, pd.DataFrame([fila_grupo])], ignore_index=True)
-        filas_grupo_temporal.append(fila_grupo)
+        #filas_grupo_temporal.append(fila_grupo)
         print(fila_grupo)
         # Añadir las filas originales para cada grupo
         filas_grupo_temporal.extend(data_grupo.to_dict(orient='records'))
 
+          # Agregar filas con años faltantes con valores en 0
+        
         # for _, row in data_grupo.iterrows():
         #     df_final = pd.concat([df_final, row.to_frame().T], ignore_index=True)
 
@@ -448,6 +454,7 @@ def agregar_subtotales(df, campos_agrupacion_seleccionados):  # FUNCIÓN CON EL 
             nombre_comun_anterior = None
             for _, row in data_grupo.iterrows():
                 producto_actual = row[campos_agrupacion_seleccionados[0]]
+                
                 nombre_comun_actual = obtener_nombre_comun(producto_actual)
                 ano = row['Ano']  # Obtener el año actual de la fila
 
@@ -459,6 +466,10 @@ def agregar_subtotales(df, campos_agrupacion_seleccionados):  # FUNCIÓN CON EL 
                             campos_agrupacion_seleccionados[0]: f"SUBTOTAL: {nombre_comun_anterior}",
                             'Ano': ano_acumulado
                         })
+                        if fila_totales["Prom"] > 0:
+                            fila_totales["Dur"] = round(fila_totales["Stock"] / fila_totales["Prom"],2)
+                        else:
+                            fila_totales["Dur"] = 0
                         filas_grupo_temporal_acumulada.append(fila_totales)
                     valores_acumulados_por_ano[nombre_comun_anterior] = {}  # Limpiar acumulador para el siguiente nombre común
 
@@ -492,8 +503,8 @@ def agregar_subtotales(df, campos_agrupacion_seleccionados):  # FUNCIÓN CON EL 
             # Asegurarse de que las filas procesadas se guarden correctamente
             filas_grupo_temporal = filas_grupo_temporal_acumulada  # Reemplazar las filas originales con las filas procesadas
 
-        # for fila in filas_grupo_temporal:
-        #     df_final = pd.concat([df_final, pd.DataFrame([fila])], ignore_index=True)
+        for fila in filas_grupo_temporal:
+             df_final = pd.concat([df_final, pd.DataFrame([fila])], ignore_index=True)
 
         # Agregar subtotales por año para el grupo
         for ano in data_grupo['Ano'].unique():
@@ -503,9 +514,15 @@ def agregar_subtotales(df, campos_agrupacion_seleccionados):  # FUNCIÓN CON EL 
             else:
                 subtotales_ano['DESCRIPCION'] = f'TOTALES SUB GENERAL'
             subtotales_ano['Ano'] = ano  # Mantener el año en los subtotales
+
+             # Calcular "Dur" como Stock / Prom
+            if subtotales_ano["Prom"] > 0:
+                subtotales_ano["Dur"] = round(subtotales_ano["Stock"] / subtotales_ano["Prom"],2)
+            else:
+                subtotales_ano["Dur"] = 0
+
             df_final = pd.concat([df_final, subtotales_ano.to_frame().T], ignore_index=True)
 
-            
 
         # Agregar una fila vacía después de cada grupo (después de los subtotales)
         fila_vacia = {columna: None for columna in df_final.columns}
@@ -517,6 +534,15 @@ def agregar_subtotales(df, campos_agrupacion_seleccionados):  # FUNCIÓN CON EL 
     df_final = df_final.drop(columns=['Grupo'], errors='ignore')
     df_final = df_final.drop(columns=['MT2'], errors='ignore')
 
+    for grupo, data_grupo in df_final.groupby(campos_agrupacion_seleccionados[0]):
+        for ano in anos_presentes:
+            if ano not in data_grupo['Ano'].values:
+                fila_faltante = {col: 0 for col in df_final.columns}
+                fila_faltante['Ano'] = ano
+                fila_faltante[campos_agrupacion_seleccionados[0]] = grupo
+                df_final = pd.concat([df_final, pd.DataFrame([fila_faltante])], ignore_index=True)
+
+
     return df_final
 
 
@@ -526,6 +552,8 @@ def agregar_subtotales_Extra(df, campos_agrupacion_seleccionados):
     
     # Crear una lista para almacenar todos los resultados
     resultados = []
+
+
 
     # Agrupar por los campos de agrupación seleccionados y Año para obtener las sumas por cada combinación
     df_grouped = df.groupby(campos_agrupacion_seleccionados + ['Ano'], as_index=False).sum(numeric_only=True)
@@ -569,7 +597,7 @@ def agregar_subtotales_Extra(df, campos_agrupacion_seleccionados):
     for grupo, data_grupo in df_grouped.groupby('Grupo'):
         # Lista temporal para almacenar las filas del grupo actual
         filas_grupo_temporal = []
-
+        
         #AGREGAR FILA DEL NOMBRE DEL GRUPO 
         fila_grupo = {columna: None for columna in df_grouped.columns}
         if campos_agrupacion_seleccionados[0] == 'CRITERIO PARA AGRUPAR':
@@ -581,19 +609,24 @@ def agregar_subtotales_Extra(df, campos_agrupacion_seleccionados):
         print(fila_grupo)
         # Añadir las filas originales para cada grupo
         filas_grupo_temporal.extend(data_grupo.to_dict(orient='records'))
-        
+
+
+
         if marcar.get() == 1:
+            
             filas_grupo_temporal_acumulada = []  # Lista para almacenar las filas procesadas
             valores_acumulados_por_ano = {}  # Acumuladores por año y nombre común
             nombre_comun_anterior = None
             filas_grupo_temporal_acumulada.append(fila_grupo)
             for _, row in data_grupo.iterrows():
+                
                 producto_actual = row[campos_agrupacion_seleccionados[0]]
                 nombre_comun_actual = obtener_nombre_comun(producto_actual)
                 ano = row['Ano']  # Obtener el año actual de la fila
 
                 # Si cambia el nombre común, agregar filas de totales acumulados del anterior
                 if nombre_comun_anterior and nombre_comun_actual != nombre_comun_anterior:
+                    
                     for ano_acumulado, valores_totales in valores_acumulados_por_ano[nombre_comun_anterior].items():
                         fila_totales = {mes: valores_totales[mes] for mes in valores_totales}
                         fila_totales.update({
@@ -646,6 +679,11 @@ def agregar_subtotales_Extra(df, campos_agrupacion_seleccionados):
                         if pd.notna(cantidad_mes) and cantidad_mes > 0:
                             valor_mes = round(m2 * cantidad_mes)
                             valores_totales_ano[mes] += valor_mes
+             # Calcular "Dur" como Stock / Prom
+            if valores_totales_ano["Prom"] > 0:
+                valores_totales_ano["Dur"] = round(valores_totales_ano["Stock"] / valores_totales_ano["Prom"],2)
+            else:
+                valores_totales_ano["Dur"] = 0
 
             fila_extra = {
                 campos_agrupacion_seleccionados[0]: f"TOTALES EXTRA GENERAL",
@@ -798,7 +836,7 @@ def Combinar_funciones(df, campos_agrupacion_seleccionados): #fUNCION CON EL CRI
             #subtotales_ano['CRITERIO PARA AGRUPAR'] = f'TOTALES SUB'
             subtotales_ano['Ano'] = ano
             filas_grupo_temporal.append(subtotales_ano.to_dict())
-        
+    
         # Agregar las filas "Extra" (agrupando por Grupo)
         for ano in data_grupo['Ano'].unique():
             # Inicializar los valores de los meses a 0
