@@ -6,6 +6,89 @@ import os
 import pyodbc
 import re
 import numpy as np
+from openpyxl import load_workbook
+from openpyxl.styles import Border, Side, PatternFill, Font, Alignment
+
+# Cargar el archivo Excel
+def modificarExcel(Nombre):
+    user_dir = os.path.expanduser("~")
+    #ruta del archivo
+    #archivo = os.path.join(user_dir, "Desktop","dist","main", Nombre)
+    
+    archivo = f"C:\\Users\\Jonathan\\Desktop\\Proyecto Excel Python\\{Nombre}" 
+    wb = load_workbook(archivo)
+    ws = wb.active
+
+    # Definir estilos
+    borde_grueso = Border(bottom=Side(style="thick"))
+    borde_fino = Border(bottom=Side(style="thin"))
+    relleno_categoria = PatternFill(start_color="FFD966", end_color="FFD966", fill_type="solid")
+    relleno_totales = PatternFill(start_color="B6D7A8", end_color="B6D7A8", fill_type="solid")
+    fuente_negrita = Font(bold=True)
+    fuente_blanca = Font(color="FFFFFF")
+    alineacion_centrada = Alignment(horizontal="center", vertical="center")
+
+    # Aplicar formato a las categorías
+    for fila in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=1):  # Recorre la columna A
+        for celda in fila:
+            if '**' in str(celda.value):
+                # Fusión de celdas (si es necesario)
+                ws.merge_cells(start_row=celda.row, start_column=1, end_row=celda.row, end_column=ws.max_column)
+                celda.fill = relleno_categoria
+                celda.font = fuente_negrita
+                celda.alignment = alineacion_centrada
+                #celda.border = borde_grueso
+
+    # Resaltar totales
+    for fila in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=ws.max_column):
+        for celda in fila:
+            if celda.value and "TOTALES EXTRA" in str(celda.value):  # Identificar totales
+                for celda_total in ws[celda.row]:
+                    #celda_total.fill = relleno_totales
+                    celda_total.font = fuente_negrita
+                    celda_total.border = borde_fino
+    
+    for fila in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=ws.max_column):
+        for celda in fila:
+            if celda.value and "SUBTOTALES" in str(celda.value):  # Identificar totales
+                for celda_total in ws[celda.row]:
+                    #celda_total.fill = relleno_totales
+                    celda_total.font = fuente_negrita
+                    celda_total.border = borde_fino
+
+     # Aplicar formato de miles a los valores numéricos
+    for fila in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=ws.max_column):
+        for celda in fila:
+            if celda.column != 2:
+                if isinstance(celda.value, (int, float)):
+                    if isinstance(celda.value, int):
+                        celda.number_format = '#,##0'  # Formato de número con separador de miles sin decimales
+                    else:
+                        celda.number_format = '#,##0.00'  # Formato de número con separador de miles y dos decimales
+    
+    producto_anterior = None
+    for fila in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=1):
+        for celda in fila:
+            producto_actual = celda.value
+            if producto_actual != producto_anterior and producto_anterior is not None:
+                for celda_borde in ws[celda.row - 1]:
+                    celda_borde.border = borde_grueso
+            producto_anterior = producto_actual
+
+    producto_anterior = None
+    for fila in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=1):
+        for celda in fila:
+            producto_actual = celda.value
+            if producto_actual == producto_anterior:
+                celda.font = fuente_blanca
+            producto_anterior = producto_actual
+
+
+
+    # Guardar los cambios
+    wb.save("Reporte.xlsx")
+    print("Archivo guardado como 'Reporte.xlsx'")
+
 
 def conectar_base_datos():
     """Establece la conexión con la base de datos Access."""
@@ -337,6 +420,7 @@ def generar_reporte():
             ruta_excel = "reporte_calculado_con_subtotales_y_extra.xlsx"
             # Aplicar formato a todas las columnas numéricas
             df_grouped.to_excel(ruta_excel, index=False)
+            modificarExcel(ruta_excel)
             messagebox.showinfo("Éxito", f"Reporte generado correctamente con totales y extra: {ruta_excel}")
         
         elif agregar_subtotales_Ext.get():
@@ -349,7 +433,9 @@ def generar_reporte():
 
             ruta_excel = "reporte_calculado_con_extra.xlsx"
             df_grouped.to_excel(ruta_excel, index=False)
+            modificarExcel(ruta_excel)
             messagebox.showinfo("Éxito", f"Reporte generado correctamente con totales extra: {ruta_excel}")
+            
 
         elif agregar_subtotales_var.get():
             # Llamar a la función para calcular solo los subtotales
@@ -358,12 +444,14 @@ def generar_reporte():
             # Guardar el DataFrame resultante en un archivo Excel
             ruta_excel = "reporte_calculado_con_subtotales.xlsx"
             df_grouped.to_excel(ruta_excel, index=False)
+            modificarExcel(ruta_excel)
             messagebox.showinfo("Éxito", f"Reporte generado correctamente con subtotales: {ruta_excel}")
         else:
             # Si no se marca el checkbox, guarda el reporte sin subtotales
             ruta_excel = "reporte_calculado.xlsx"
             df_grouped = df_grouped.drop(columns=['MT2'], errors='ignore')
             df_grouped.to_excel(ruta_excel, index=False)
+            modificarExcel(ruta_excel)
             messagebox.showinfo("Éxito", f"Reporte generado correctamente: {ruta_excel}")
             # df_calculos = df_calculos.drop(columns=['MT2'], errors='ignore')
             # df_calculos.to_excel(ruta_excel, index=False)
@@ -433,20 +521,15 @@ def agregar_subtotales(df, campos_agrupacion_seleccionados):  # FUNCIÓN CON EL 
         fila_grupo = {col: None for col in df_grouped.columns}
         #print(df_grouped.columns)
         if campos_agrupacion_seleccionados[0] == 'CRITERIO PARA AGRUPAR':
-            fila_grupo['CRITERIO PARA AGRUPAR'] = f"**{grupo}**" # Etiqueta de subtotal
+            fila_grupo['CRITERIO PARA AGRUPAR'] = f"**{grupo}**" # Etiqueta
         else:
             fila_grupo['DESCRIPCION'] = f"**{grupo}**"
 
         df_final = pd.concat([df_final, pd.DataFrame([fila_grupo])], ignore_index=True)
         #filas_grupo_temporal.append(fila_grupo)
-        print(fila_grupo)
+        #print(fila_grupo)
         # Añadir las filas originales para cada grupo
         filas_grupo_temporal.extend(data_grupo.to_dict(orient='records'))
-
-          # Agregar filas con años faltantes con valores en 0
-        
-        # for _, row in data_grupo.iterrows():
-        #     df_final = pd.concat([df_final, row.to_frame().T], ignore_index=True)
 
         if marcarSubtotal.get() == 1:
             filas_grupo_temporal_acumulada = []  # Lista para almacenar las filas procesadas
@@ -608,7 +691,7 @@ def agregar_subtotales_Extra(df, campos_agrupacion_seleccionados):
         else:
             fila_grupo['DESCRIPCION'] = f"**{grupo}**"
         filas_grupo_temporal.append(fila_grupo)
-        print(fila_grupo)
+        #print(fila_grupo)
         # Añadir las filas originales para cada grupo
         filas_grupo_temporal.extend(data_grupo.to_dict(orient='records'))
 
@@ -696,7 +779,7 @@ def agregar_subtotales_Extra(df, campos_agrupacion_seleccionados):
                 campos_agrupacion_seleccionados[0]: f"TOTALES EXTRA GENERAL",
                 'Ano': ano,
             }
-            print(fila_extra)
+            #print(fila_extra)
             fila_extra.update(valores_totales_ano)
 
             # Agregar la fila de totales extra al grupo
@@ -845,9 +928,9 @@ def Combinar_funciones(df, campos_agrupacion_seleccionados): #fUNCION CON EL CRI
         for ano in data_grupo['Ano'].unique():
             subtotales_ano = data_grupo[data_grupo['Ano'] == ano].sum(numeric_only=True)
             if campos_agrupacion_seleccionados[0] == 'CRITERIO PARA AGRUPAR':
-                subtotales_ano['CRITERIO PARA AGRUPAR'] = f'TOTALES SUB'  # Etiqueta de subtotal
+                subtotales_ano['CRITERIO PARA AGRUPAR'] = f'SUBTOTALES GENERAL'  # Etiqueta de subtotal
             else:
-                subtotales_ano['DESCRIPCION'] = f'TOTALES SUB GENERAL'
+                subtotales_ano['DESCRIPCION'] = f'SUBTOTALES GENERAL'
 
             subtotales_ano['Ano'] = ano
             # Calcular "Dur" como Stock / Prom
@@ -1107,5 +1190,10 @@ boton_generar.grid(row=7, column=1, pady=5, sticky="ew")
 
 # Ejecutar la aplicación
 ventana.mainloop()
+
+
+
+
+
 
 
